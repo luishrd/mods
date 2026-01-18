@@ -4,6 +4,7 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
 import org.slf4j.Logger;
@@ -26,13 +27,40 @@ public class Hud implements ModInitializer {
 				tickCounter = 0;
 
 				for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+					ServerLevel level = player.level();
+
 					int x = (int) player.getX();
 					int z = (int) player.getZ();
 					int y = (int) player.getY();
 
 					String heading = getCardinalDirection(player.getYRot());
 
-					String message = String.format("X:%-7d Y:%-7d H:%-4d ◆ %s", x, z, y, heading);
+					long dayTime = level.getDayTime() % 24000;
+
+					long ticksUntilBed = (12542 - dayTime + 24000) % 24000;
+					long ticksUntilMobs = (13000 - dayTime + 24000) % 24000;
+					long ticksUntilDawn = (24000 - dayTime) % 24000;
+
+					String event;
+					long ticksUntil;
+
+					if (ticksUntilBed <= ticksUntilMobs && ticksUntilBed <= ticksUntilDawn) {
+						event = "Bed ";
+						ticksUntil = ticksUntilBed;
+					} else if (ticksUntilMobs <= ticksUntilDawn) {
+						event = "Mobs";
+						ticksUntil = ticksUntilMobs;
+					} else {
+						event = "Dawn";
+						ticksUntil = ticksUntilDawn;
+					}
+
+					int minutes = (int) (ticksUntil / 1200);
+					int seconds = (int) ((ticksUntil % 1200) / 20);
+					String timeString = String.format("%02d:%02d", minutes, seconds);
+
+					String message = String.format("X:%-7d Y:%-7d H:%-4d ◆ %-2s ◆ %s in %s",
+							x, z, y, heading, event, timeString);
 
 					player.displayClientMessage(Component.literal(message), true);
 				}
