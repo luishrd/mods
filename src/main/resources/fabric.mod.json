@@ -1,0 +1,32 @@
+{
+	"schemaVersion": 1,
+	"id": "hud",
+	"version": "${version}",
+	"name": "hud",
+	"description": "A simple hud for people who get lost easily",
+	"authors": ["pidinit"],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/hud/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["com.pidinit.Hud"],
+		"client": ["com.pidinit.HudClient"]
+	},
+	"mixins": [
+		"hud.mixins.json",
+		{
+			"config": "hud.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.18.4",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
