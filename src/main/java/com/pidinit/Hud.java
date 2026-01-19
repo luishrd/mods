@@ -15,6 +15,15 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.lang.reflect.Type;
+import java.nio.file.Path;
 
 public class Hud implements ModInitializer {
 	public static final String MOD_ID = "hud";
@@ -40,6 +49,7 @@ public class Hud implements ModInitializer {
 	public void onInitialize() {
 		LOGGER.info("HUD mod initializing...");
 
+		// pins
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
 			dispatcher.register(
 					Commands.literal("pins").executes(context -> {
@@ -77,6 +87,44 @@ public class Hud implements ModInitializer {
 					}));
 		});
 
+		// pin remove name
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+			dispatcher.register(
+					Commands.literal("pin")
+							.then(Commands.literal("remove")
+									.then(Commands.argument("name", StringArgumentType.greedyString())
+											.executes(context -> {
+												String pinName = StringArgumentType.getString(context, "name");
+												ServerPlayer player = context.getSource().getPlayerOrException();
+												String playerUUID = player.getStringUUID();
+												String dimension = player.level().dimension().identifier().toString();
+
+												Map<String, Map<String, PinData>> playerPins = pins.get(playerUUID);
+
+												if (playerPins == null || !playerPins.containsKey(dimension)) {
+													context.getSource().sendSystemMessage(
+															Component.literal("Pin '" + pinName + "' not found"));
+													return 0;
+												}
+
+												Map<String, PinData> dimensionPins = playerPins.get(dimension);
+												PinData removed = dimensionPins.remove(pinName);
+
+												if (removed == null) {
+													context.getSource().sendSystemMessage(
+															Component.literal("Pin '" + pinName + "' not found"));
+													return 0;
+												}
+
+												savePins(player.level(), playerUUID);
+
+												context.getSource().sendSystemMessage(
+														Component.literal("✓ Pin '" + pinName + "' removed"));
+												return 1;
+											}))));
+		});
+
+		// pin name
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
 			dispatcher.register(
 					Commands.literal("pin")
@@ -93,6 +141,8 @@ public class Hud implements ModInitializer {
 												.computeIfAbsent(dimension, k -> new ConcurrentHashMap<>())
 												.put(pinName,
 														new PinData(pos.getX(), pos.getY(), pos.getZ(), dimension));
+
+										savePins(player.level(), playerUUID);
 
 										context.getSource().sendSystemMessage(
 												Component.literal(String.format("✓ Pin '%s' saved at X:%d Y:%d Z:%d",
@@ -162,6 +212,12 @@ public class Hud implements ModInitializer {
 			}
 		});
 
+		ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
+			if (entity instanceof ServerPlayer player) {
+				loadPins(player.level(), player.getStringUUID());
+			}
+		});
+
 		LOGGER.info("HUD mod initialized!");
 	}
 
@@ -206,5 +262,63 @@ public class Hud implements ModInitializer {
 
 	private String bold(String text) {
 		return "§l" + text + "§r";
+	}
+
+	private Path getPinsDirectory(ServerLevel level) {
+		Path serverDir = level.getServer().getServerDirectory();
+		return serverDir.resolve("data").resolve("pins");
+	}
+
+	private File getPlayerPinsFile(ServerLevel level, String playerUUID) {
+		Path pinsDir = getPinsDirectory(level);
+		File pinsDirFile = pinsDir.toFile();
+
+		LOGGER.info("Attempting to create pins directory at: {}", pinsDirFile.getAbsolutePath());
+
+		if (!pinsDirFile.exists()) {
+			boolean created = pinsDirFile.mkdirs();
+			LOGGER.info("Directory creation result: {}, exists now: {}", created, pinsDirFile.exists());
+		} else {
+			LOGGER.info("Directory already exists");
+		}
+
+		File jsonFile = pinsDir.resolve(playerUUID + ".json").toFile();
+		LOGGER.info("Pin file path: {}", jsonFile.getAbsolutePath());
+
+		return jsonFile;
+	}
+
+	private void savePins(ServerLevel level, String playerUUID) {
+		Map<String, Map<String, PinData>> playerPins = pins.get(playerUUID);
+		if (playerPins == null)
+			return;
+
+		File file = getPlayerPinsFile(level, playerUUID);
+		Gson gson = new GsonBuilder().setPrettyPrinting().create();
+
+		try (FileWriter writer = new FileWriter(file)) {
+			gson.toJson(playerPins, writer);
+		} catch (IOException e) {
+			LOGGER.error("Failed to save pins for player {}", playerUUID, e);
+		}
+	}
+
+	private void loadPins(ServerLevel level, String playerUUID) {
+		File file = getPlayerPinsFile(level, playerUUID);
+		if (!file.exists())
+			return;
+
+		Gson gson = new Gson();
+		Type type = new TypeToken<Map<String, Map<String, PinData>>>() {
+		}.getType();
+
+		try (FileReader reader = new FileReader(file)) {
+			Map<String, Map<String, PinData>> loadedPins = gson.fromJson(reader, type);
+			if (loadedPins != null) {
+				pins.put(playerUUID, new ConcurrentHashMap<>(loadedPins));
+			}
+		} catch (IOException e) {
+			LOGGER.error("Failed to load pins for player {}", playerUUID, e);
+		}
 	}
 }
