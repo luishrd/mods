@@ -1,9 +1,7 @@
-#
-# https://help.github.com/articles/dealing-with-line-endings/
-#
-# Linux start script should use lf
-/gradlew        text eol=lf
+# Handle line endings automatically for files detected as text 
+# but do not force a specific style on the local working tree.
+* text=auto
 
-# These are Windows script files and should use crlf
-*.bat           text eol=crlf
-
+# Keep specific overrides only for files that MUST have a certain format to run.
+/gradlew text eol=lf
+*.bat text eol=crlf
