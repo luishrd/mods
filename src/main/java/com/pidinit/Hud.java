@@ -5,10 +5,13 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.minecraft.commands.Commands;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -19,6 +22,20 @@ public class Hud implements ModInitializer {
 
 	private int tickCounter = 0;
 
+	private static class PinData {
+		final int x, y, z;
+		final String dimension;
+
+		PinData(int x, int y, int z, String dimension) {
+			this.x = x;
+			this.y = y;
+			this.z = z;
+			this.dimension = dimension;
+		}
+	}
+
+	private final Map<String, Map<String, Map<String, PinData>>> pins = new ConcurrentHashMap<>();
+
 	@Override
 	public void onInitialize() {
 		LOGGER.info("HUD mod initializing...");
@@ -26,7 +43,36 @@ public class Hud implements ModInitializer {
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
 			dispatcher.register(
 					Commands.literal("pins").executes(context -> {
-						context.getSource().sendSystemMessage(Component.literal("Pin system works!"));
+						ServerPlayer player = context.getSource().getPlayerOrException();
+						String playerUUID = player.getStringUUID();
+						String currentDimension = player.level().dimension().identifier().toString();
+
+						Map<String, Map<String, PinData>> playerPins = pins.get(playerUUID);
+
+						if (playerPins == null || !playerPins.containsKey(currentDimension)) {
+							context.getSource().sendSystemMessage(
+									Component.literal("No pins in this dimension"));
+							return 1;
+						}
+
+						Map<String, PinData> dimensionPins = playerPins.get(currentDimension);
+
+						if (dimensionPins.isEmpty()) {
+							context.getSource().sendSystemMessage(
+									Component.literal("No pins in this dimension"));
+							return 1;
+						}
+
+						context.getSource().sendSystemMessage(
+								Component.literal("=== Your Pins ==="));
+
+						for (Map.Entry<String, PinData> entry : dimensionPins.entrySet()) {
+							PinData pin = entry.getValue();
+							context.getSource().sendSystemMessage(
+									Component.literal(String.format("  %s: X:%d Y:%d Z:%d",
+											entry.getKey(), pin.x, pin.y, pin.z)));
+						}
+
 						return 1;
 					}));
 		});
@@ -37,8 +83,20 @@ public class Hud implements ModInitializer {
 							.then(Commands.argument("name", StringArgumentType.greedyString())
 									.executes(context -> {
 										String pinName = StringArgumentType.getString(context, "name");
+
+										ServerPlayer player = context.getSource().getPlayerOrException();
+										BlockPos pos = player.blockPosition();
+										String dimension = player.level().dimension().identifier().toString();
+										String playerUUID = player.getStringUUID();
+
+										pins.computeIfAbsent(playerUUID, k -> new ConcurrentHashMap<>())
+												.computeIfAbsent(dimension, k -> new ConcurrentHashMap<>())
+												.put(pinName,
+														new PinData(pos.getX(), pos.getY(), pos.getZ(), dimension));
+
 										context.getSource().sendSystemMessage(
-												Component.literal("Creating pin: " + pinName));
+												Component.literal(String.format("✓ Pin '%s' saved at X:%d Y:%d Z:%d",
+														pinName, pos.getX(), pos.getY(), pos.getZ())));
 										return 1;
 									})));
 		});
@@ -51,10 +109,11 @@ public class Hud implements ModInitializer {
 
 				for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 					ServerLevel level = player.level();
+					BlockPos position = player.blockPosition();
 
-					int x = (int) player.getX();
-					int z = (int) player.getZ();
-					int y = (int) player.getY();
+					int x = position.getX();
+					int z = position.getZ();
+					int y = position.getY();
 
 					String heading = getCardinalDirection(player.getYRot());
 
