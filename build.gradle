@@ -92,3 +92,21 @@ publishing {
 		// retrieving dependencies.
 	}
 }
+
+task deploySandbox {
+	dependsOn build
+	doLast {
+		def jarFile = file("build/libs/hud-1.0.0.jar")
+		def remoteHost = "dockerhost"
+		def remoteUser = "groot"
+		def remotePath = "/home/groot/sandbox/data/mods/"
+		
+		if (!jarFile.exists()) {
+			throw new GradleException("JAR file not found: ${jarFile.absolutePath}")
+		}
+		
+		"scp ${jarFile.absolutePath} ${remoteUser}@${remoteHost}:${remotePath}".execute().waitFor()
+		
+		println "✓ Deployed hud-1.0.0.jar to sandbox mods folder"
+	}
+}
