@@ -43,6 +43,16 @@ public class Hud implements ModInitializer {
 		}
 	}
 
+	private static class NavigationDisplay {
+		final String indicator;
+		final int distance;
+
+		NavigationDisplay(String indicator, int distance) {
+			this.indicator = indicator;
+			this.distance = distance;
+		}
+	}
+
 	private final Map<String, Map<String, Map<String, PinData>>> pins = new ConcurrentHashMap<>();
 	private final Map<String, String> activeNavigationTarget = new ConcurrentHashMap<>();
 
@@ -262,17 +272,42 @@ public class Hud implements ModInitializer {
 						Map<String, Map<String, PinData>> playerPins = pins.get(player.getStringUUID());
 						String currentDim = player.level().dimension().identifier().toString();
 
-						if (playerPins != null && playerPins.containsKey(currentDim)) {
-							PinData targetPin = playerPins.get(currentDim).get(navTarget);
+						if (playerPins != null) {
+							PinData targetPin = null;
+
+							for (Map<String, PinData> dimensionPins : playerPins.values()) {
+								if (dimensionPins.containsKey(navTarget)) {
+									targetPin = dimensionPins.get(navTarget);
+									break;
+								}
+							}
 
 							if (targetPin != null) {
-								String arrow = getDirectionArrow(player.getYRot(), player.blockPosition(), targetPin);
-								String navSection = color(arrow, Color.GOLD) + " " + color(navTarget, Color.GREY);
+								NavigationDisplay nav = getNavigationDisplay(player.getYRot(), player.blockPosition(),
+										targetPin, currentDim);
+								String navSection;
+
+								if (!targetPin.dimension.equals(currentDim)) {
+									String dimName = getDimensionDisplayName(targetPin.dimension);
+									navSection = color(nav.indicator, Color.GOLD) + " " +
+											color(nav.distance + "m", Color.GREY) + " " +
+											color(navTarget + " [" + dimName + "]", Color.GREY);
+								} else {
+									if (nav.indicator.equals("⬤")) {
+										navSection = color(nav.indicator, Color.GOLD) + " " +
+												color("at " + navTarget, Color.GREY);
+									} else {
+										navSection = color(nav.indicator, Color.GOLD) + " " +
+												color(nav.distance + "m", Color.GREY) + " " +
+												color(navTarget, Color.GREY);
+									}
+								}
 
 								message = String.format("%s %s %s %s %s %s %s %s %s %s",
 										xCoord, yCoord, hCoord, separator, formattedHeading, separator,
 										event, timeString, separator, navSection);
 							} else {
+								activeNavigationTarget.remove(player.getStringUUID());
 								message = String.format("%s %s %s %s %s %s %s %s",
 										xCoord, yCoord, hCoord, separator, formattedHeading, separator, event,
 										timeString);
@@ -409,34 +444,64 @@ public class Hud implements ModInitializer {
 	}
 
 	private double calculateDistance(BlockPos from, PinData to) {
-		int dx = to.x - from.getX();
-		int dy = to.y - from.getY();
-		int dz = to.z - from.getZ();
+		int dx = Math.abs(to.x - from.getX());
+		int dy = Math.abs(to.y - from.getY());
+		int dz = Math.abs(to.z - from.getZ());
+
+		dx = Math.max(0, dx - 2);
+		dz = Math.max(0, dz - 2);
+		dy = Math.max(0, dy - 2);
+
 		return Math.sqrt(dx * dx + dy * dy + dz * dz);
 	}
 
-	private String getDirectionArrow(float playerYaw, BlockPos playerPos, PinData target) {
+	private NavigationDisplay getNavigationDisplay(float playerYaw, BlockPos playerPos, PinData target,
+			String currentDimension) {
+		double distance = calculateDistance(playerPos, target);
+		int distanceBlocks = (int) Math.round(distance);
+
+		if (!target.dimension.equals(currentDimension)) {
+			return new NavigationDisplay("⊗", distanceBlocks);
+		}
+
+		if (distance < 1.0) {
+			return new NavigationDisplay("⬤", distanceBlocks);
+		}
+
 		double dx = target.x - playerPos.getX();
 		double dz = target.z - playerPos.getZ();
 
 		double angleToTarget = Math.toDegrees(Math.atan2(dz, dx)) - 90;
 		double normalizedAngle = ((angleToTarget - playerYaw) % 360 + 360) % 360;
 
+		String arrow;
 		if (normalizedAngle >= 337.5 || normalizedAngle < 22.5)
-			return "⬆";
-		if (normalizedAngle >= 22.5 && normalizedAngle < 67.5)
-			return "⬈";
-		if (normalizedAngle >= 67.5 && normalizedAngle < 112.5)
-			return "➡";
-		if (normalizedAngle >= 112.5 && normalizedAngle < 157.5)
-			return "⬊";
-		if (normalizedAngle >= 157.5 && normalizedAngle < 202.5)
-			return "⬇";
-		if (normalizedAngle >= 202.5 && normalizedAngle < 247.5)
-			return "⬋";
-		if (normalizedAngle >= 247.5 && normalizedAngle < 292.5)
-			return "⬅";
-		return "⬉";
+			arrow = "⬆";
+		else if (normalizedAngle >= 22.5 && normalizedAngle < 67.5)
+			arrow = "⬈";
+		else if (normalizedAngle >= 67.5 && normalizedAngle < 112.5)
+			arrow = "➡";
+		else if (normalizedAngle >= 112.5 && normalizedAngle < 157.5)
+			arrow = "⬊";
+		else if (normalizedAngle >= 157.5 && normalizedAngle < 202.5)
+			arrow = "⬇";
+		else if (normalizedAngle >= 202.5 && normalizedAngle < 247.5)
+			arrow = "⬋";
+		else if (normalizedAngle >= 247.5 && normalizedAngle < 292.5)
+			arrow = "⬅";
+		else
+			arrow = "⬉";
+
+		return new NavigationDisplay(arrow, distanceBlocks);
+	}
+
+	private String getDimensionDisplayName(String dimensionId) {
+		return switch (dimensionId) {
+			case "minecraft:overworld" -> "Overworld";
+			case "minecraft:the_nether" -> "Nether";
+			case "minecraft:the_end" -> "End";
+			default -> dimensionId;
+		};
 	}
 
 }
