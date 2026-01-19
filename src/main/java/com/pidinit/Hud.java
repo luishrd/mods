@@ -44,6 +44,7 @@ public class Hud implements ModInitializer {
 	}
 
 	private final Map<String, Map<String, Map<String, PinData>>> pins = new ConcurrentHashMap<>();
+	private final Map<String, String> activeNavigationTarget = new ConcurrentHashMap<>();
 
 	@Override
 	public void onInitialize() {
@@ -151,6 +152,63 @@ public class Hud implements ModInitializer {
 									})));
 		});
 
+		// go name
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+			dispatcher.register(
+					Commands.literal("go")
+							.then(Commands.argument("name", StringArgumentType.greedyString())
+									.executes(context -> {
+										String pinName = StringArgumentType.getString(context, "name");
+										ServerPlayer player = context.getSource().getPlayerOrException();
+										String playerUUID = player.getStringUUID();
+										String dimension = player.level().dimension().identifier().toString();
+
+										Map<String, Map<String, PinData>> playerPins = pins.get(playerUUID);
+
+										if (playerPins == null || !playerPins.containsKey(dimension)) {
+											context.getSource().sendSystemMessage(
+													Component.literal(
+															"Pin '" + pinName + "' not found in this dimension"));
+											return 0;
+										}
+
+										PinData pin = playerPins.get(dimension).get(pinName);
+
+										if (pin == null) {
+											context.getSource().sendSystemMessage(
+													Component.literal("Pin '" + pinName + "' not found"));
+											return 0;
+										}
+
+										activeNavigationTarget.put(playerUUID, pinName);
+
+										context.getSource().sendSystemMessage(
+												Component.literal("✓ Navigating to '" + pinName + "'"));
+										return 1;
+									})));
+		});
+
+		// go stop
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+			dispatcher.register(
+					Commands.literal("go")
+							.then(Commands.literal("stop")
+									.executes(context -> {
+										ServerPlayer player = context.getSource().getPlayerOrException();
+										String playerUUID = player.getStringUUID();
+
+										if (activeNavigationTarget.remove(playerUUID) != null) {
+											context.getSource().sendSystemMessage(
+													Component.literal("✓ Navigation stopped"));
+											return 1;
+										} else {
+											context.getSource().sendSystemMessage(
+													Component.literal("No active navigation"));
+											return 0;
+										}
+									})));
+		});
+
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			tickCounter++;
 
@@ -197,8 +255,36 @@ public class Hud implements ModInitializer {
 					String formattedHeading = color(heading, Color.GREEN);
 					String separator = color("◆", Color.GREY);
 
-					String message = String.format("%s %s %s %s %s %s %s %s",
-							xCoord, yCoord, hCoord, separator, formattedHeading, separator, event, timeString);
+					String message;
+					String navTarget = activeNavigationTarget.get(player.getStringUUID());
+
+					if (navTarget != null) {
+						Map<String, Map<String, PinData>> playerPins = pins.get(player.getStringUUID());
+						String currentDim = player.level().dimension().identifier().toString();
+
+						if (playerPins != null && playerPins.containsKey(currentDim)) {
+							PinData targetPin = playerPins.get(currentDim).get(navTarget);
+
+							if (targetPin != null) {
+								String arrow = getDirectionArrow(player.getYRot(), player.blockPosition(), targetPin);
+								String navSection = color(arrow, Color.GOLD) + " " + color(navTarget, Color.GREY);
+
+								message = String.format("%s %s %s %s %s %s %s %s %s %s",
+										xCoord, yCoord, hCoord, separator, formattedHeading, separator,
+										event, timeString, separator, navSection);
+							} else {
+								message = String.format("%s %s %s %s %s %s %s %s",
+										xCoord, yCoord, hCoord, separator, formattedHeading, separator, event,
+										timeString);
+							}
+						} else {
+							message = String.format("%s %s %s %s %s %s %s %s",
+									xCoord, yCoord, hCoord, separator, formattedHeading, separator, event, timeString);
+						}
+					} else {
+						message = String.format("%s %s %s %s %s %s %s %s",
+								xCoord, yCoord, hCoord, separator, formattedHeading, separator, event, timeString);
+					}
 
 					player.displayClientMessage(Component.literal(message), true);
 				}
@@ -321,4 +407,36 @@ public class Hud implements ModInitializer {
 			LOGGER.error("Failed to load pins for player {}", playerUUID, e);
 		}
 	}
+
+	private double calculateDistance(BlockPos from, PinData to) {
+		int dx = to.x - from.getX();
+		int dy = to.y - from.getY();
+		int dz = to.z - from.getZ();
+		return Math.sqrt(dx * dx + dy * dy + dz * dz);
+	}
+
+	private String getDirectionArrow(float playerYaw, BlockPos playerPos, PinData target) {
+		double dx = target.x - playerPos.getX();
+		double dz = target.z - playerPos.getZ();
+
+		double angleToTarget = Math.toDegrees(Math.atan2(dz, dx)) - 90;
+		double normalizedAngle = ((angleToTarget - playerYaw) % 360 + 360) % 360;
+
+		if (normalizedAngle >= 337.5 || normalizedAngle < 22.5)
+			return "⬆";
+		if (normalizedAngle >= 22.5 && normalizedAngle < 67.5)
+			return "⬈";
+		if (normalizedAngle >= 67.5 && normalizedAngle < 112.5)
+			return "➡";
+		if (normalizedAngle >= 112.5 && normalizedAngle < 157.5)
+			return "⬊";
+		if (normalizedAngle >= 157.5 && normalizedAngle < 202.5)
+			return "⬇";
+		if (normalizedAngle >= 202.5 && normalizedAngle < 247.5)
+			return "⬋";
+		if (normalizedAngle >= 247.5 && normalizedAngle < 292.5)
+			return "⬅";
+		return "⬉";
+	}
+
 }
